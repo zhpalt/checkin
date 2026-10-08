@@ -19,14 +19,16 @@ const glados = async () => {
         headers: { ...common, 'content-type': 'application/json' },
         body: '{"token":"glados.cloud"}',
       }).then((r) => r.json())
-      if (action?.code !== 0) throw new Error(`${action?.message || 'Invalid check-in response'} (code=${action?.code}, reason=${action?.reason || 'unknown'})`)
+      const alreadyCheckedIn = action?.code === 1 &&
+        action?.message === "Today's observation logged. Return tomorrow for more points."
+      if (action?.code !== 0 && !alreadyCheckedIn) throw new Error(`${action?.message || 'Invalid check-in response'} (code=${action?.code}, reason=${action?.reason || 'unknown'})`)
       const status = await fetch('https://glados.cloud/api/user/status', {
         method: 'GET',
         headers: { ...common },
       }).then((r) => r.json())
       if (status?.code !== 0) throw new Error(`${status?.message || 'Invalid status response'} (code=${status?.code}, reason=${status?.reason || 'unknown'})`)
       notice.push(
-        'Checkin OK',
+        alreadyCheckedIn ? 'Checkin Already Done' : 'Checkin OK',
         `${action?.message}`,
         `Left Days ${Number(status?.data?.leftDays)}`
       )
