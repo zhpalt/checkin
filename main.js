@@ -1,3 +1,35 @@
+import { createHash } from 'node:crypto'
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const checkin = async (headers) => {
+  const challengeResponse = await fetch('https://glados.cloud/api/user/checkin/challenge', {
+    method: 'GET',
+    headers,
+  })
+  if (!challengeResponse.ok) throw new Error(`Check-in challenge HTTP ${challengeResponse.status}`)
+  const challenge = await challengeResponse.json()
+  const receivedAt = Date.now()
+  const nonce = challenge?.nonce
+  const ttl = challenge?.ttl ?? 300000
+  if (challenge?.code !== 0 || typeof nonce !== 'string' || !nonce || nonce.length > 4096 ||
+      typeof ttl !== 'number' || !Number.isFinite(ttl) || ttl <= 2700) {
+    throw new Error(`Invalid check-in challenge (code=${challenge?.code ?? 'unknown'})`)
+  }
+
+  // The site waits at least 2.5 seconds before submitting the one-time proof.
+  await wait(2700)
+  if (Date.now() - receivedAt >= ttl) throw new Error('Check-in challenge expired')
+  const proof = createHash('sha256').update(`${nonce}.glados-observe-v1`, 'utf8').digest('hex')
+  const response = await fetch('https://glados.cloud/api/user/checkin', {
+    method: 'POST',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({ token: 'glados.cloud', nonce, proof }),
+  })
+  if (!response.ok) throw new Error(`Check-in HTTP ${response.status}`)
+  return response.json()
+}
+
 const glados = async () => {
   const notice = []
   const cookies = String(process.env.GLADOS || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
@@ -14,11 +46,7 @@ const glados = async () => {
         'referer': 'https://glados.cloud/console/checkin',
         'user-agent': agents.length === 1 ? agents[0] : agents[index],
       }
-      const action = await fetch('https://glados.cloud/api/user/checkin', {
-        method: 'POST',
-        headers: { ...common, 'content-type': 'application/json' },
-        body: '{"token":"glados.cloud"}',
-      }).then((r) => r.json())
+      const action = await checkin(common)
       const alreadyCheckedIn = action?.code === 1 &&
         action?.message === "Today's observation logged. Return tomorrow for more points."
       if (action?.code !== 0 && !alreadyCheckedIn) throw new Error(`${action?.message || 'Invalid check-in response'} (code=${action?.code}, reason=${action?.reason || 'unknown'})`)
